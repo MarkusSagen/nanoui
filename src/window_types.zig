@@ -9,7 +9,24 @@ pub const Asset = struct {
     mime: ?[]const u8 = null,
 };
 
+/// One OS file drop, delivered to the host on the UI thread. Slices are
+/// borrowed until the callback returns; copy URLs kept by a worker.
+pub const PageFileDrop = struct {
+    /// Top-left coordinates in page-view logical points, not DOM pixels.
+    point: ui.Point,
+    urls: []const []const u8,
+};
+pub const PageFileDropHandler = struct {
+    /// Application-owned; must remain valid until the page is destroyed.
+    ctx: ?*anyopaque = null,
+    on_drop: *const fn (ctx: ?*anyopaque, drop: PageFileDrop) void,
+};
+
 pub const PageOptions = struct {
+    /// macOS MVP: the host consumes local-file drops over this whole page.
+    /// Null preserves WebKit handling. Non-file drops are passed through.
+    /// Other page backends return FileDropsUnsupported when enabled.
+    file_drop: ?PageFileDropHandler = null,
     /// Relative URLs resolve against `nanoui://localhost/`, served from
     /// `assets`; absolute URLs (`http://localhost:5173`) load as is.
     url: []const u8 = "/",

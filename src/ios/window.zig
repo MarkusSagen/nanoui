@@ -60,6 +60,7 @@ pub const Window = struct {
     title: [256:0]u8 = @splat(0),
 
     pub fn create(app: *App, options: Options) !*Window {
+        if (options.content == .page and options.content.page.file_drop != null) return error.FileDropsUnsupported;
         const self = try app.gpa.create(Window);
         self.* = .{
             .app = app,

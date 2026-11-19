@@ -177,6 +177,21 @@ pub fn build(b: *std.Build) void {
     }
 
     // The 30-second reel of ui.motion (tools/reel.sh adds the sound).
+    // Host file-drop MVP: its example intentionally targets macOS only.
+    if (os == .macos) {
+        const drop_demo = b.addExecutable(.{ .name = "page-drop", .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/page-drop/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "nanoui", .module = nanoui }},
+        }) });
+        b.installArtifact(drop_demo);
+        b.step("page-drop", "Build the webview file-drop example").dependOn(&b.addInstallArtifact(drop_demo, .{}).step);
+        const run_drop = b.addRunArtifact(drop_demo);
+        run_drop.addPassthruArgs();
+        b.step("run-page-drop", "Run the webview file-drop example").dependOn(&run_drop.step);
+    }
+
     const reel = b.addExecutable(.{
         .name = "nanoui-reel",
         .root_module = b.createModule(.{

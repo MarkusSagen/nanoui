@@ -63,6 +63,7 @@ pub const Page = struct {
     shown: bool = true,
 
     pub fn create(window: *Window, options: window_mod.PageOptions) !*Page {
+        if (options.file_drop != null) return error.FileDropsUnsupported;
         const gpa = window.app.gpa;
         // A custom controller parent need not run nanoui's window procedure.
         const handles = try target.Handles.init(window.hwnd, options.parent);

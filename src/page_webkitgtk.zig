@@ -25,6 +25,7 @@ pub const Page = struct {
     flush_source: c_uint = 0,
 
     pub fn create(window: *Window, options: window_mod.PageOptions) !*Page {
+        if (options.file_drop != null) return error.FileDropsUnsupported;
         if (!wk.load()) return error.WebKitMissing;
         const app = window.app;
         const gpa = app.gpa;

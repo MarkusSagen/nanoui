@@ -315,6 +315,8 @@ export declare const Greeter: { greet(name: string): Promise<string> };
 export declare function onTick(listener: (payload: TickPayload) => void): () => void;
 ```
 
+On macOS, `PageOptions.file_drop` delivers local files to the host: [webview file drops](docs/page-file-drops.md).
+
 Methods may return error unions; an error rejects the page's promise with
 the error's name. Assets are served from the `nanoui://localhost/` scheme.
 Elements styled `--app-region: drag` move frameless windows.

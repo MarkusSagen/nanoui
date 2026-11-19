@@ -117,6 +117,11 @@ pub const Presentation = if (mac) @import("app_extras.zig").Presentation else vo
 /// macOS, WebView2 on Windows.
 pub const Page = if (mac) @import("page_webkit.zig").Page else if (builtin.os.tag == .windows) @import("page_webview2.zig").Page else void;
 pub const Asset = plat.window.Asset;
+pub const PageFileDrop = @import("window_types.zig").PageFileDrop;
+pub const PageFileDropHandler = @import("window_types.zig").PageFileDropHandler;
+/// OS local-file drops to a page host are currently implemented on macOS.
+pub const page_file_drop_supported = mac;
+
 /// Typed IPC for pages: wherever a webview draws them (macOS, iOS, Windows, Linux).
 const has_pages = mac or builtin.os.tag == .ios or builtin.os.tag == .windows or (builtin.os.tag == .linux and !is_android);
 const page_ipc = if (has_pages) @import("ipc.zig").ipc(plat.window.Window, plat.app.App) else struct {};
@@ -273,6 +278,7 @@ test {
     std.testing.refAllDecls(@import("tray.zig").Tray);
     // The window's own: borderless, out of the window cycle, its alpha.
     _ = @import("tests_window.zig");
+    _ = @import("tests_page_drop.zig");
     // Screens, the About panel's options, recent documents.
     _ = @import("screens.zig");
     _ = @import("app_extras.zig");

@@ -1,0 +1,14 @@
+<!doctype html><html><meta charset="utf-8"><title>Webview file drops</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f4f5f7;color:#17202b;font:16px -apple-system,BlinkMacSystemFont,sans-serif;padding:48px}main{max-width:800px;margin:auto}small{font-size:12px;letter-spacing:2px;color:#657284}h1{font-size:42px;letter-spacing:-1.6px;margin:14px 0}p{color:#657284;line-height:1.6}.zone{border:2px dashed #9eb3c8;background:#edf3f9;border-radius:20px;text-align:center;padding:30px;margin-top:28px}h2{font-size:23px;margin:0 0 10px}button{border:0;border-radius:9px;background:#213c5a;color:white;padding:11px 18px;font:inherit;cursor:pointer}.card{border:1px solid #e0e5eb;background:white;border-radius:18px;padding:24px;margin-top:24px}.file{display:flex;gap:16px;align-items:center;border-bottom:1px solid #edf0f3;padding:14px 0}.file:last-child{border:0}.icon{background:#e7eef7;color:#355a83;border-radius:8px;padding:10px;font:12px ui-monospace,monospace}.label{font-size:12px;color:#657284;margin-bottom:8px}.tag{font-size:12px;color:#17643c;background:#e0f3e7;border-radius:20px;padding:6px 10px;float:right}.note{font-size:12px}
+</style><main><small>NANOUI / WEBVIEW FILE DROP MVP</small><h1>Files reach the host.</h1><p>Drop local files over this page. Zig receives one callback with the batch, then sends display names back through typed IPC.</p><section class="zone"><h2>Drop files here</h2><p>Or use the keyboard-accessible file picker.</p><button onclick="nanoui.call('Demo.choose')">Choose files…</button></section><section class="card"><span class="tag" id="status">Waiting</span><div class="label" id="source">No files received</div><div id="files"><p>Your imported files will appear here.</p></div></section><p class="note" id="note">Local file URLs remain on the host. This page receives display names only.</p></main><script>
+nanoui.on('files', payload => {
+ document.getElementById('source').textContent=payload.source;
+ document.getElementById('status').textContent=payload.names.length+' files · 1 callback';
+ const list=document.getElementById('files');list.replaceChildren();
+ for(const name of payload.names){const row=document.createElement('div');row.className='file';const icon=document.createElement('span');icon.className='icon';icon.textContent=name.split('.').pop().toUpperCase();const label=document.createElement('span');label.textContent=name;row.append(icon,label);list.append(row)}
+ if(payload.source==='In-process AppKit test drop')document.getElementById('note').textContent='Real WKWebView capture · In-process drag fixture · No Finder gesture or system input';
+ setTimeout(()=>nanoui.call('Demo.captured'),150);
+});
+addEventListener('load',()=>nanoui.call('Demo.ready'));
+</script></html>

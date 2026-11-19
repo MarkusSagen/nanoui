@@ -14,6 +14,7 @@ const ipc = @import("ipc.zig").ipc(window_mod.Window, app_mod.App);
 const page = @import("page.zig");
 
 const Window = window_mod.Window;
+const drop = if (ios) struct {} else @import("page_webkit_drop.zig");
 const bridge_js = page.bridge_js;
 
 extern "c" fn dlopen(path: [*:0]const u8, mode: c_int) ?*anyopaque;
@@ -23,8 +24,10 @@ pub const Page = struct {
     webview: objc.Object,
     handler: objc.Object,
     last_mouse_down: ?objc.Object = null,
+    active_drops: usize = 0,
 
     pub fn create(window: *Window, options: window_mod.PageOptions) !*Page {
+        if (ios and options.file_drop != null) return error.FileDropsUnsupported;
         const gpa = window.app.gpa;
         const self = try gpa.create(Page);
         errdefer gpa.destroy(self);
@@ -45,9 +48,9 @@ pub const Page = struct {
         const webview_class = objc.defineClass(.{
             .name = "NanoUIWebView",
             .superclass = "WKWebView",
-            .methods = if (ios) &.{} else &.{
+            .methods = if (ios) &.{} else &([_]objc.Method{
                 .{ .name = "mouseDown:", .imp = &webViewMouseDown, .types = "v@:@" },
-            },
+            } ++ drop.methods),
         });
 
         const handler = objc.msg(objc.Object, handler_class, "new", .{});
@@ -88,6 +91,7 @@ pub const Page = struct {
         // The web view is not the content view: WebKit docks the inspector in its superview.
         objc.msg(void, content_view, "addSubview:", .{webview});
 
+        if (!ios and options.file_drop != null) drop.configure(webview);
         self.webview = webview;
         self.handler = handler;
         self.loadUrl(options.url);
@@ -106,8 +110,18 @@ pub const Page = struct {
         self.queue.deinit();
         // A scheduled flush frees the page when it runs, a message being
         // handled when it returns; without either, now.
-        if (self.queue.flush_scheduled or self.queue.dispatching) return;
+        self.freeClosed();
+    }
+
+    /// A drop callback may close its page, or reenter IPC while doing so.
+    pub fn freeClosed(self: *Page) void {
+        if (self.queue.flush_scheduled or self.queue.dispatching or self.active_drops != 0) return;
         self.queue.gpa.destroy(self);
+    }
+
+    pub fn endDrop(self: *Page) void {
+        self.active_drops -= 1;
+        if (self.queue.dead) self.freeClosed();
     }
 
     pub fn enqueue(self: *Page, msg: []const u8, hold: bool) void {
@@ -197,7 +211,8 @@ fn sendJs(ctx: *anyopaque, js: []const u8) void {
 fn flushJob(ctx: ?*anyopaque) callconv(.c) void {
     const self: *Page = @ptrCast(@alignCast(ctx));
     if (self.queue.dead) {
-        self.queue.gpa.destroy(self);
+        self.queue.flush_scheduled = false;
+        self.freeClosed();
         return;
     }
     self.queue.flush();
