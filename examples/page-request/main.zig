@@ -45,7 +45,7 @@ pub fn main(init: std.process.Init) !void {
         .title = "Deferred first request",
         .width = 900,
         .height = 720,
-        .content = .{ .page = .{ .url = demo.url, .defer_initial_load = true } },
+        .content = .{ .page = .{ .url = demo.url, .defer_initial_load = true, .private = true } },
     });
     nanoui.App.after(800, &demo, Demo.start);
     try app.run();
