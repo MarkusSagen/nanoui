@@ -29,6 +29,9 @@ pub const Api = struct {
     webkit_security_manager_register_uri_scheme_as_secure: *const fn (manager: Obj, scheme: Str) callconv(.c) void,
     webkit_security_manager_register_uri_scheme_as_cors_enabled: *const fn (manager: Obj, scheme: Str) callconv(.c) void,
     webkit_web_view_get_type: *const fn () callconv(.c) usize,
+    webkit_uri_request_new: *const fn (uri: Str) callconv(.c) Obj,
+    webkit_uri_request_get_http_headers: *const fn (request: Obj) callconv(.c) ?Obj,
+    webkit_web_view_load_request: *const fn (view: Obj, request: Obj) callconv(.c) void,
     webkit_web_view_load_uri: *const fn (view: Obj, uri: Str) callconv(.c) void,
     webkit_web_view_get_settings: *const fn (view: Obj) callconv(.c) Obj,
     webkit_web_view_get_user_content_manager: *const fn (view: Obj) callconv(.c) Obj,
@@ -69,6 +72,7 @@ pub var v6: Api6 = undefined;
 pub var v4x: Api4x = undefined;
 /// WebKitGTK 6.0 is loaded (else 4.1 or 4.0).
 pub var six = false;
+pub var replaceHeader: *const fn (headers: Obj, name: Str, value: Str) callconv(.c) void = undefined;
 /// 6.0 is here, and bubblewrap can't run for it (`sandboxFails`).
 pub var blocked = false;
 var state: enum { untried, loaded, missing } = .untried;
@@ -152,12 +156,14 @@ pub fn load() bool {
             return false;
         }
         if (!table(Api, lib, &api) or !table(Api6, lib, &v6)) return false;
+        replaceHeader = @ptrCast(@alignCast(std.c.dlsym(lib, "soup_message_headers_replace") orelse return false));
         six = true;
     } else {
         const lib = for (names4x) |n| {
             if (open(n)) |l| break l;
         } else return false;
         if (!table(Api, lib, &api) or !table(Api4x, lib, &v4x)) return false;
+        replaceHeader = @ptrCast(@alignCast(std.c.dlsym(lib, "soup_message_headers_replace") orelse return false));
     }
     state = .loaded;
     return true;

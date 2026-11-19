@@ -45,7 +45,7 @@ pub const Page = struct {
         self.message_signal = gtk.api.g_signal_connect_data(manager, "script-message-received::nanoui", @ptrCast(&onMessage), self, null, 0);
         self.crash_signal = gtk.api.g_signal_connect_data(view, "web-process-terminated", @ptrCast(&onTerminated), self, null, 0);
 
-        self.load(options.url);
+        if (!options.defer_initial_load) self.load(options.url);
         return self;
     }
 
@@ -102,6 +102,25 @@ pub const Page = struct {
             gtk.v3.gdk_device_get_position(pointer, null, &x, &y);
             gtk.v3.gtk_window_begin_move_drag(win, 1, x, y, 0);
         }
+    }
+
+    /// One GET navigation. The native request owns its header copies.
+    pub fn loadRequest(self: *Page, request: @import("page_request.zig").Request) !void {
+        try @import("page_request.zig").validate(request);
+        var arena = std.heap.ArenaAllocator.init(self.queue.gpa);
+        defer arena.deinit();
+        const a = arena.allocator();
+        const buf = try a.alloc(u8, request.url.len + page.origin.len + 1);
+        const uri = try a.dupeSentinel(u8, page.fullUrl(buf, request.url), 0);
+        const req = wk.api.webkit_uri_request_new(uri);
+        defer gtk.api.g_object_unref(req);
+        if (request.headers.len > 0) {
+            const headers = wk.api.webkit_uri_request_get_http_headers(req) orelse return error.HeadersUnsupported;
+            for (request.headers) |h| wk.replaceHeader(headers, try a.dupeSentinel(u8, h.name, 0), try a.dupeSentinel(u8, h.value, 0));
+        }
+        self.queue.setCurrent(request.url);
+        self.queue.dom_ready = false;
+        wk.api.webkit_web_view_load_request(self.view, req);
     }
 
     /// Points the view at `url`: a path from the assets, or an absolute one.

@@ -38,6 +38,7 @@ pub const Window = struct {
     /// controller, in `page_host`.
     view: ?ui.View = null,
     page_options: ?PageOptions = null,
+    pending_request: @import("../page_request.zig").Pending = .{},
     page: ?*Page = null,
     page_host: ?objc.Object = null,
     theme: ?ui.Theme = null,
@@ -101,11 +102,25 @@ pub const Window = struct {
         const host = objc.msg(objc.Object, objc.alloc("UIView"), "initWithFrame:", .{objc.msg(objc.CGRect, screen, "bounds", .{})});
         objc.msg(void, host, "setBackgroundColor:", .{objc.msg(objc.Object, objc.class("UIColor"), "systemBackgroundColor", .{})});
         self.page_host = host;
-        self.page = Page.create(self, self.page_options.?) catch |err| {
+        var opts = self.page_options.?;
+        if (self.pending_request.owned != null) opts.defer_initial_load = true;
+        self.page = Page.create(self, opts) catch |err| {
             std.log.err("nanoui: page: {s}", .{@errorName(err)});
             return;
         };
+        if (self.pending_request.take()) |owned| {
+            var request = owned;
+            defer request.deinit();
+            self.page.?.loadRequest(request.request) catch |err| std.log.err("nanoui: pending navigation: {s}", .{@errorName(err)});
+        }
         objc.msg(void, vc, "setView:", .{host});
+    }
+
+    /// Queued (latest wins) until UIKit realizes this page. UI thread.
+    pub fn loadPageRequest(self: *Window, request: @import("../page_request.zig").Request) !void {
+        if (self.page) |p| return p.loadRequest(request);
+        if (self.page_options == null) return error.NoPage;
+        try self.pending_request.set(self.app.gpa, request);
     }
 
     /// Points a page's window at `url`: a path from the app's assets, or an
@@ -156,6 +171,7 @@ pub const Window = struct {
         // Closed before the screen changes: a frame UIKit runs meanwhile
         // (of the window under it, showing again) may close it too.
         self.closed = true;
+        self.pending_request.deinit();
         self.wanted = false;
         scenes.closeOwn(self);
         for (self.app.pending_scenes.items, 0..) |w, i| if (w == self) {

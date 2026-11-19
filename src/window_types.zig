@@ -13,6 +13,8 @@ pub const PageOptions = struct {
     /// Relative URLs resolve against `nanoui://localhost/`, served from
     /// `assets`; absolute URLs (`http://localhost:5173`) load as is.
     url: []const u8 = "/",
+    /// Create the webview, but wait for loadPageRequest / Page.load.
+    defer_initial_load: bool = false,
     assets: []const Asset = &.{},
     /// A name the app gives the page ("motion-code"), carried by every call
     /// it makes (`Call.label`) so a service can tell its pages apart.

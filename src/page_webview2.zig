@@ -41,6 +41,7 @@ pub const Page = struct {
     pending_flush: bool = false,
     /// The environment is asked for once the loop runs (`start`).
     pending_start: bool = true,
+    pending_request: @import("page_request.zig").Pending = .{},
     /// `--nanoui-eval`, kept until the page has loaded.
     pending_eval: ?[]const u8 = null,
     /// A hidden run's window, shown off-screen while the controller is made
@@ -174,6 +175,7 @@ pub const Page = struct {
 
     fn freeNow(self: *Page) void {
         const gpa = self.queue.gpa;
+        self.pending_request.deinit();
         self.queue.deinit();
         if (self.webview) |v| {
             if (self.token_resource != 0) _ = wv.WebView.removeWebResourceRequested(v, self.token_resource);
@@ -284,11 +286,21 @@ pub const Page = struct {
         self.queue.flush();
     }
 
+    pub fn loadRequest(self: *Page, request: @import("page_request.zig").Request) !void {
+        if (!self.enter()) return error.PageClosed;
+        defer self.leave();
+        if (self.webview == null) return self.pending_request.set(self.queue.gpa, request);
+        try @import("page_webview2_request.zig").load(self, request);
+    }
+
     pub fn load(self: *Page, url: []const u8) void {
         if (!self.enter()) return;
         defer self.leave();
         self.queue.dom_ready = false;
-        const view = self.webview orelse return;
+        const view = self.webview orelse {
+            self.pending_request.set(self.queue.gpa, .{ .url = url }) catch {};
+            return;
+        };
         var buf: [2048]u8 = undefined;
         // An absolute URL (`https://example.com`) loads as is, as WKWebView's
         // does; only a path is the app's own, served from its assets.
@@ -472,7 +484,11 @@ pub const Page = struct {
         _ = wv.WebView.addScript(v, wide[0..n :0].ptr, null);
         if (self.queue.dead) return;
 
-        self.load(self.queue.options.url);
+        if (self.pending_request.take()) |owned| {
+            var request = owned;
+            defer request.deinit();
+            self.loadRequest(request.request) catch |err| std.log.err("nanoui: pending navigation: {s}", .{@errorName(err)});
+        } else if (!self.queue.options.defer_initial_load) self.load(self.queue.options.url);
         if (self.queue.dead) return;
         if (self.pending_flush) {
             self.pending_flush = false;

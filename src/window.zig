@@ -393,6 +393,12 @@ pub const Window = struct {
         objc.msg(void, self.nswindow, "setTitle:", .{objc.nsString(title)});
     }
 
+    /// A single GET with headers; UI thread. Returns NoPage for native UI.
+    pub fn loadPageRequest(self: *Window, request: @import("page_request.zig").Request) !void {
+        const p = self.page orelse return error.NoPage;
+        try p.loadRequest(request);
+    }
+
     /// Points a page's window at `url`: a path from the app's assets, or an
     /// absolute `http(s)://` one. No effect on a native-UI window.
     pub fn setPageUrl(self: *Window, url: []const u8) void {

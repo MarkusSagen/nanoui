@@ -40,6 +40,10 @@ pub const Window = struct {
     closed: bool = false,
     title: [256:0]u8 = @splat(0),
 
+    pub fn loadPageRequest(_: *Window, _: @import("../page_request.zig").Request) !void {
+        return error.PagesUnsupported;
+    }
+
     pub fn create(app: *App, options: Options) !*Window {
         const view = switch (options.content) {
             .page => return error.PagesUnsupported,

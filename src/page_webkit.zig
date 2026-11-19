@@ -90,7 +90,7 @@ pub const Page = struct {
 
         self.webview = webview;
         self.handler = handler;
-        self.loadUrl(options.url);
+        if (!options.defer_initial_load) self.loadUrl(options.url);
         return self;
     }
 
@@ -165,6 +165,21 @@ pub const Page = struct {
         const req = objc.msg(objc.Object, objc.class("NSURLRequest"), "requestWithURL:", .{nsurl});
         self.queue.dom_ready = false;
         _ = objc.msg(?objc.Object, self.webview, "loadRequest:", .{req});
+    }
+
+    /// One GET navigation. WebKit copies the native request before return.
+    pub fn loadRequest(self: *Page, request: @import("page_request.zig").Request) !void {
+        try @import("page_request.zig").validate(request);
+        const pool = objc.Pool.push();
+        defer pool.pop();
+        const buf = try self.queue.gpa.alloc(u8, request.url.len + page.origin.len + 1);
+        defer self.queue.gpa.free(buf);
+        const url = objc.msg(?objc.Object, objc.class("NSURL"), "URLWithString:", .{objc.nsString(page.fullUrl(buf, request.url))}) orelse return error.InvalidUrl;
+        const req = objc.msg(objc.Object, objc.class("NSMutableURLRequest"), "requestWithURL:", .{url});
+        for (request.headers) |h| objc.msg(void, req, "setValue:forHTTPHeaderField:", .{ objc.nsString(h.value), objc.nsString(h.name) });
+        self.queue.setCurrent(request.url);
+        self.queue.dom_ready = false;
+        if (objc.msg(?objc.Object, self.webview, "loadRequest:", .{req}) == null) return error.NavigationFailed;
     }
 
     /// `Page.load`, for the window's `.page` content.

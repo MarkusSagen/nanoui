@@ -319,6 +319,8 @@ Methods may return error unions; an error rejects the page's promise with
 the error's name. Assets are served from the `nanoui://localhost/` scheme.
 Elements styled `--app-region: drag` move frameless windows.
 
+`PageOptions.defer_initial_load` and `Window.loadPageRequest` support deferred GET navigation with headers: [page requests](docs/page-requests.md).
+
 ## Testing without a window
 
 ```zig

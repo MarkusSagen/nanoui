@@ -104,6 +104,8 @@ pub const AppOptions = plat.app.Options;
 pub const Window = plat.window.Window;
 pub const WindowOptions = plat.window.Options;
 pub const PageOptions = plat.window.PageOptions;
+pub const PageRequest = @import("page_request.zig").Request;
+pub const PageHeader = @import("page_request.zig").Header;
 /// How high a window stacks (`WindowOptions.level`, `Window.setLevel`).
 pub const WindowLevel = @import("window_types.zig").Level;
 /// A connected screen (`App.screens`), the About panel's options
