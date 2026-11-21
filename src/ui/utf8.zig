@@ -1,5 +1,12 @@
 //! UTF-8 helpers every platform shares.
 
+/// Clamp a byte offset to the text and round down to a scalar boundary.
+pub fn floorBoundary(s: []const u8, offset: usize) usize {
+    var at = @min(offset, s.len);
+    while (at > 0 and at < s.len and (s[at] & 0xc0) == 0x80) at -= 1;
+    return at;
+}
+
 /// The length of the UTF-8 sequence starting with `b` (1 for a stray byte).
 pub fn seqLen(b: u8) usize {
     if (b < 0x80) return 1;

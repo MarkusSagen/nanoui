@@ -62,6 +62,41 @@ test "want_selection selects range" {
     try testing.expectEqualStrings("gix", s.buf.text());
 }
 
+test "text editing offsets cannot split a UTF-8 scalar" {
+    const emoji = "\u{1f642}";
+    const han = "\u{65e5}";
+    var s: Field = .{};
+    defer s.deinit();
+    var t: ui.Tester = undefined;
+    try t.init(testing.allocator, .init(&s, Field.view), .{});
+    defer t.deinit();
+    try t.clickText("Address");
+
+    s.buf.set("A" ++ emoji ++ han);
+    s.buf.want_caret = 2;
+    t.frame();
+    try testing.expectEqual(@as(usize, 1), t.ctx.focused_text.?.caret);
+    t.typeText("x");
+    try testing.expectEqualStrings("Ax" ++ emoji ++ han, s.buf.text());
+
+    // A reversed selection rounds both ends down and retains its direction.
+    s.buf.want_selection = .{ 7, 4 };
+    t.frame();
+    try testing.expectEqual(@as(usize, 6), t.ctx.focused_text.?.anchor);
+    try testing.expectEqual(@as(usize, 2), t.ctx.focused_text.?.caret);
+    try testing.expectEqualStrings(emoji, selected(&t));
+
+    // A queued selection and insertion can run before another frame clamps.
+    t.textOps(&.{ .{ .select = .{ .anchor = 3, .caret = 8 } }, .{ .insert = "!" } });
+    try testing.expectEqualStrings("Ax!" ++ han, s.buf.text());
+
+    t.textOps(&.{.{ .set_marked = .{ .text = emoji, .sel_start = 1, .sel_len = std.math.maxInt(usize) } }});
+    try testing.expectEqual(@as(usize, 3), t.ctx.focused_text.?.anchor);
+    try testing.expectEqual(@as(usize, 7), t.ctx.focused_text.?.caret);
+    t.textOps(&.{.{ .insert = "?" }});
+    try testing.expectEqualStrings("Ax!?" ++ han, s.buf.text());
+}
+
 test "focusNext focuses field" {
     var s: Field = .{};
     defer s.deinit();
