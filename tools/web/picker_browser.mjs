@@ -88,42 +88,43 @@ try {
     await page.waitForTimeout(300);
     assert.equal(await page.evaluate(() => window.nanoui.host.stats.callbacks), frames);
 
-    await page.evaluate(() => {
-      const button = document.createElement("button");
-      button.textContent = "Choose test file";
-      button.style.cssText = "position:fixed;top:0;right:0";
-      button.onclick = () => { window.fileResult = window.nanoui.host.pickFile({ accept: ".txt", maxBytes: 32 }); };
-      document.body.append(button);
-    });
+    const fileButton = page.getByRole("button", { name: "Choose text file" });
     const [chooser] = await Promise.all([
       page.waitForEvent("filechooser"),
-      page.getByRole("button", { name: "Choose test file" }).click(),
+      fileButton.click(),
     ]);
+    assert.equal(await chooser.element().getAttribute("accept"), ".txt");
     await chooser.setFiles({ name: "fixture.txt", mimeType: "text/plain", buffer: Buffer.from("chosen data") });
-    assert.deepEqual(await page.evaluate(async () => {
-      const file = await window.fileResult;
-      return [file.name, new TextDecoder().decode(file.bytes)];
-    }), ["fixture.txt", "chosen data"]);
+    await page.getByText("fixture.txt (11 bytes)", { exact: true }).waitFor();
+    await page.getByText("chosen data", { exact: true }).waitFor();
 
+    await fileButton.focus();
     const [large] = await Promise.all([
       page.waitForEvent("filechooser"),
-      page.getByRole("button", { name: "Choose test file" }).click(),
+      page.keyboard.press("Enter"),
     ]);
-    await page.evaluate(() => {
-      window.fileRejected = window.fileResult.then(() => false, error => error instanceof RangeError);
-    });
-    await large.setFiles({ name: "large.txt", mimeType: "text/plain", buffer: Buffer.alloc(33, 65) });
-    assert.equal(await page.evaluate(() => window.fileRejected), true);
+    await large.setFiles({ name: "large.txt", mimeType: "text/plain", buffer: Buffer.alloc(32769, 65) });
+    await page.getByText("The file exceeds 32 KiB", { exact: true }).waitFor();
     await Promise.all([
       page.waitForEvent("filechooser"),
-      page.getByRole("button", { name: "Choose test file" }).click(),
+      fileButton.click(),
     ]);
-    assert.equal(await page.evaluate(() => {
-      document.querySelector('input[type="file"]').dispatchEvent(new Event("cancel"));
-      return window.fileResult;
-    }), null);
+    await page.locator('input[type="file"]').evaluate(el => el.dispatchEvent(new Event("cancel")));
+    await page.getByText("No file chosen", { exact: true }).waitFor();
     await page.locator('input[type="file"]').waitFor({ state: "detached" });
 
+    // Hiding the bound button abandons the request instead of delivering
+    // results into the next view.
+    await Promise.all([
+      page.waitForEvent("filechooser"),
+      fileButton.click(),
+    ]);
+    await trigger.focus();
+    await page.keyboard.press("Enter");
+    await input.waitFor();
+    await page.locator('input[type="file"]').waitFor({ state: "detached" });
+    await page.keyboard.press("Escape");
+    await fileButton.waitFor();
 
     console.log(`PASS collection picker, composition, semantics, focus, clipboard and file on ${cpu ? "Canvas 2D" : "WebGPU"}`);
     await page.evaluate(() => window.nanoui.destroy());

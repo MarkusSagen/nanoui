@@ -17,7 +17,7 @@ function keyCode(name) {
 export function createHost(canvas, options = {}) {
   const decoder = new TextDecoder();
   const files = canvas.ownerDocument ? createFilePicker(canvas.ownerDocument) : null;
-  let cpuImage, semantics;
+  let cpuImage, semantics, zigFile;
   let runtime, context, frame = null, timer = null, observer, media;
   let stopped = false, lost = false, paused = true, generation = 0, forceRecovery = false;
   const listeners = [];
@@ -114,6 +114,49 @@ export function createHost(canvas, options = {}) {
     inputEvents.push(["key", kind, code, mods, typed]);
     request();
   }
+  async function pickFromZig(id, options) {
+    if (!files || stopped || zigFile) return;
+    const e = runtime.exports;
+    const token = e.nanoui_web_file_begin(id) >>> 0;
+    if (!token) return;
+    const request = { token, abort: new AbortController() };
+    zigFile = request;
+    let status = 2;
+    try {
+      const file = await files.pickFile({
+        accept: options.accept,
+        maxBytes: options.max_bytes,
+        signal: request.abort.signal,
+      });
+      if (zigFile !== request || stopped) return;
+      status = 0;
+      if (file) {
+        const name = new TextEncoder().encode(file.name);
+        if (name.length === 0 || name.length > 4096) {
+          status = 2;
+        } else {
+          const ptr = e.nanoui_web_file_reserve(token, name.length, file.bytes.length);
+          status = 4;
+          if (ptr) {
+            const out = new Uint8Array(e.memory.buffer, ptr, name.length + file.bytes.length);
+            out.set(name);
+            out.set(file.bytes, name.length);
+            status = 1;
+          }
+        }
+      }
+    } catch (error) {
+      if (error instanceof RangeError) status = 3;
+      else if (error.name === "InvalidStateError") status = 5;
+      else if (error.name === "NotAllowedError") status = 6;
+    } finally {
+      if (zigFile === request) {
+        zigFile = null;
+        if (!stopped) e.nanoui_web_file_finish(token, status);
+      }
+    }
+  }
+
   function configure() {
     context.configure({ device: runtime.gpu.device, format: options.format,
       alphaMode: "opaque", usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST });
@@ -155,6 +198,12 @@ export function createHost(canvas, options = {}) {
     pickFile: options => files?.pickFile(options) ?? Promise.reject(new Error("File picking requires a document")),
     stats, unwind, requestFrame: request, resize, pointer, wheel, pinch, key, setDevice,
     imports: {
+      cancel_file(token) {
+        if (zigFile?.token !== (token >>> 0)) return;
+        const request = zigFile;
+        zigFile = null;
+        request.abort.abort();
+      },
       cpu_backend: () => Number(options.cpu),
       semantics_enabled: () => Number(!!semantics),
       publish_semantics(ptr, len) {
@@ -184,7 +233,7 @@ export function createHost(canvas, options = {}) {
           if (stopped || lost) return;
           inputEvents.push(event);
           request();
-        });
+        }, pickFromZig);
       }
       if (options.cpu) {
         context = canvas.getContext("2d", { alpha: false });
@@ -330,6 +379,7 @@ export function createHost(canvas, options = {}) {
       observer?.disconnect();
       for (const off of listeners) off();
       files?.destroy();
+      zigFile = null;
       semantics?.destroy();
       runtime?.exports.nanoui_web_destroy();
       context?.unconfigure?.();

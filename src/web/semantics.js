@@ -2,7 +2,7 @@
 const button = new Set(["button", "tab", "checkbox", "switch_toggle", "radio_button", "row", "menu_button", "link"]);
 const roles = { switch_toggle: "switch", radio_button: "radio", menu_button: "button" };
 
-export function createSemantics(canvas, send) {
+export function createSemantics(canvas, send, pickFile) {
   const root = document.createElement("div");
   root.dataset.nanouiSemantics = "";
   const live = document.createElement("span");
@@ -11,6 +11,7 @@ export function createSemantics(canvas, send) {
   root.append(live);
   canvas.after(root);
   const nodes = new Map();
+  const fileButtons = new Map();
   let lastJson, focused, editor, composing = false;
   let reconciling = false;
   const encoder = new TextEncoder();
@@ -34,7 +35,11 @@ export function createSemantics(canvas, send) {
     node.style.cssText = "position:fixed;opacity:0;pointer-events:none;margin:0;box-sizing:border-box";
     if (tag === "button") {
       node.type = "button";
-      node.addEventListener("click", () => send(["access", id, true]));
+      node.addEventListener("click", () => {
+        const file = fileButtons.get(id);
+        if (file) pickFile(id, file);
+        else send(["access", id, true]);
+      });
     }
     if (tag !== "span") node.addEventListener("focus", () => {
       if (!reconciling) send(["access", id, false]);
@@ -108,6 +113,14 @@ export function createSemantics(canvas, send) {
           root.insertBefore(node, previous.nextSibling);
         previous = node;
         place(node, item.rect);
+        if (item.file_picker) {
+          fileButtons.set(id, item.file_picker);
+          node.style.pointerEvents = "auto";
+          node.style.cursor = "pointer";
+        } else if (fileButtons.delete(id)) {
+          node.style.pointerEvents = "none";
+          node.style.cursor = "";
+        }
         if (node.tagName === "SPAN") {
           if (node.textContent !== item.label) node.textContent = item.label;
           if (item.header) {
@@ -127,6 +140,7 @@ export function createSemantics(canvas, send) {
       for (const [id, node] of nodes) if (!ids.has(id)) {
         node.remove();
         nodes.delete(id);
+        fileButtons.delete(id);
       }
       focused = snapshot.focus ? { ...snapshot.focus, id: BigInt(snapshot.focus.id) } : null;
       const nextEditor = focused ? nodes.get(focused.id) : null;
@@ -147,6 +161,7 @@ export function createSemantics(canvas, send) {
   return { root, publish, destroy() {
     root.remove();
     nodes.clear();
+    fileButtons.clear();
     lastJson = focused = editor = undefined;
   } };
 }

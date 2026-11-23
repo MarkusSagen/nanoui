@@ -5,7 +5,7 @@ export function createFilePicker(document) {
   return {
     pickFile({ accept = "", maxBytes = 16 * 1024 * 1024, signal } = {}) {
       if (closed) return Promise.reject(new Error("The nanoui host is closed"));
-      if (pending) return Promise.reject(new Error("A file picker is already open"));
+      if (pending) return Promise.reject(new DOMException("A file picker is already open", "InvalidStateError"));
       if (!Number.isSafeInteger(maxBytes) || maxBytes < 0)
         return Promise.reject(new RangeError("Invalid file size limit"));
       if (signal?.aborted) return Promise.reject(signal.reason);

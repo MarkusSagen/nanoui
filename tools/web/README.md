@@ -97,11 +97,26 @@ use browser clipboard events in that field, with password selections omitted.
 A commit or paste is limited to 64 KiB. Browser preedit is displayed by the DOM
 field and is not sent to Zig until commit.
 
-`runtime.host.pickFile({ accept, maxBytes, signal })` must be invoked in a
-browser user gesture. It reads one selected file as `{ name, type, bytes }`,
-resolves to null on picker cancellation, and defaults to a 16 MiB limit.
-`accept` is a picker hint. Validate content in the caller. The host does not
-expose unrestricted paths or request filesystem permission at startup.
+Use `nanoui.file_picker.bind(c, node, options, context, callback)` during
+the build of a labeled Zig button. The standard shell opens the browser file
+input directly from that button's pointer or keyboard activation. The callback
+receives `.picked`, `.cancelled`, or `.failed` on the browser event loop.
+Picked names and bytes are borrowed until the callback returns. Keep callback
+context alive until completion or until the frame removing the bound button
+has completed. Removing the button abandons the request and any late result.
+The browser accepts one request at a time and caps configured limits at 64 MiB.
+This binding requires the standard semantic DOM host.
+
+Native Zig callers can use `nanoui.file_picker.open(allocator, io, options)`
+on the UI thread outside view building. It uses the native dialog and returns
+the same file name and bytes in an owned result. Free it with `Owned.deinit`.
+Android reports `error.Unsupported` until its native file picker is available.
+Options default to a 16 MiB limit. An extension filter is a chooser hint.
+Callers still validate content.
+
+JavaScript integrations can also use
+`runtime.host.pickFile({ accept, maxBytes, signal })` in a browser user gesture.
+It returns `{ name, type, bytes }` or null on cancellation.
 
 `start({ ..., cpuFallback: true })` uses the existing Zig CPU rasterizer if
 adapter or device acquisition fails. `cpu: true` forces it on startup.
@@ -132,7 +147,10 @@ The native check uses the offscreen Tester. The browser check uses Chromium's
 composition protocol and checks the semantic results and keyboard focus on
 WebGPU and forced Canvas 2D. The Firefox check runs the same fixture with
 injected composition events on Canvas 2D. They use disposable clipboard events
-and file fixtures. On macOS 26.0.1 the pinned Playwright WebKit process crashed
+and file fixtures. The collection picker binds its Zig file button on the
+browser and defers the native dialog through the app main loop. The browser
+fixture checks delivered bytes, size rejection, cancellation and removal of
+the bound button with a request pending. On macOS 26.0.1 the pinned Playwright WebKit process crashed
 at startup. WebKit revision 2287 passed with the matching Playwright 1.60.0
 and injected composition on Canvas 2D. To try that pairing without changing
 the repo lock, set `NANOUI_PICKER_ENGINE=webkit` and
