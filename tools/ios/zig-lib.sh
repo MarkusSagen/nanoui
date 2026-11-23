@@ -21,6 +21,10 @@ fi
 broken='    .windows, .haiku, .wasi => false,'
 fixed='    .windows, .haiku, .wasi, .ios, .tvos, .visionos, .watchos => false,'
 
+# Zig 0.17.1 already excludes tvOS and watchOS in this arm.
+if grep -qxF '    .windows, .haiku, .wasi, .tvos, .watchos => false,' "$lib/std/process.zig"; then
+    broken='    .windows, .haiku, .wasi, .tvos, .watchos => false,'
+fi
 grep -qxF "$broken" "$lib/std/process.zig" || exit 0
 
 # One copy for each Zig (its version, where it is), made again when its
