@@ -87,6 +87,33 @@ pub fn graphemeEnd(s: []const u8, start: usize) usize {
     return s.len;
 }
 
+/// Cluster containing the byte at `at`. Walk back to a boundary that does
+/// not depend on earlier context, then use the same forward UAX #29 rules.
+pub fn graphemeRange(s: []const u8, at: usize) [2]usize {
+    if (at >= s.len) return .{ s.len, s.len };
+    var start = scalarStart(s, at);
+    while (start > 0) {
+        const before = scalarStart(s, start - 1);
+        if (s[before] >= ' ' and s[before] <= '~' and s[start] >= ' ' and s[start] <= '~') break;
+        const p = property(scalar(s, before).cp);
+        const q = scalar(s, start).cp;
+        if (p != .prepend and property(q) == .other and
+            data.indicOf(q) != .consonant and (p != .zwj or !data.isPictographic(q))) break;
+        start = before;
+    }
+    while (true) {
+        const end = graphemeEnd(s, start);
+        if (at < end) return .{ start, end };
+        start = end;
+    }
+}
+
+fn scalarStart(s: []const u8, at: usize) usize {
+    var i = at;
+    while (i > 0 and s[i] & 0xc0 == 0x80) i -= 1;
+    return i;
+}
+
 const Class = enum { word, space, atom };
 
 fn class(s: []const u8, at: usize) Class {
@@ -172,6 +199,7 @@ fn checkGraphemeVectors(source: []const u8) !usize {
         var at: usize = 0;
         for (boundaries[1..count]) |end| {
             try std.testing.expectEqual(end, graphemeEnd(text, at));
+            for (at..end) |byte| try std.testing.expectEqual([2]usize{ at, end }, graphemeRange(text, byte));
             at = end;
         }
         try std.testing.expectEqual(length, at);

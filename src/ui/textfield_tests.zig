@@ -102,3 +102,28 @@ test "a filter maps or drops typed, pasted and committed text" {
     try std.testing.expectEqualStrings("123456", b.text());
     try std.testing.expect(e.marked == null);
 }
+
+test "grapheme editing moves and deletes whole clusters" {
+    const clusters = [_][]const u8{ "e\u{301}", "👩🏽‍💻", "🇸🇪", "क्ष" };
+    var b: TextBuffer = .{};
+    defer b.deinit();
+    for (clusters) |cluster| {
+        b.set("a");
+        _ = b.insert(1, cluster);
+        _ = b.insert(b.text().len, "z");
+        const end = b.text().len - 1;
+        var e: EditState = .{ .caret = 1, .anchor = 1 };
+        var r: Result = .{};
+        apply(&b, &e, .{ .command = .select_right }, .{}, .{ .write = noClip }, &r);
+        try std.testing.expectEqual(end, e.caret);
+        try std.testing.expectEqual(@as(usize, 1), e.anchor);
+        e = .{ .caret = end, .anchor = end };
+        apply(&b, &e, .{ .command = .delete_backward }, .{}, .{ .write = noClip }, &r);
+        try std.testing.expectEqualStrings("az", b.text());
+        _ = b.insert(1, cluster);
+        e = .{ .caret = 2, .anchor = 2 };
+        apply(&b, &e, .{ .command = .delete_forward }, .{}, .{ .write = noClip }, &r);
+        try std.testing.expectEqualStrings("az", b.text());
+        try std.testing.expectEqual(@as(usize, 1), e.caret);
+    }
+}
