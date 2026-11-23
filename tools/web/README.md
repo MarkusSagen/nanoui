@@ -123,6 +123,11 @@ NANOUI_PICKER_ENGINE=firefox node tools/web/picker_browser.mjs
 node tools/web/compat.mjs
 ```
 
+Open the native fixture with
+`zig build run-collection-picker -Dworkspace-search=../zig-workspace`.
+Serve the browser artifacts with `node tools/web/serve.mjs` and open
+`/collection-picker.html` at the printed URL.
+
 The native check uses the offscreen Tester. The browser check uses Chromium's
 composition protocol and checks the semantic results and keyboard focus on
 WebGPU and forced Canvas 2D. The Firefox check runs the same fixture with

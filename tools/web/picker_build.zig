@@ -35,6 +35,8 @@ pub fn add(b: *std.Build, workspace: []const u8, native: *std.Build.Module, brow
             web_demo.dependOn(@import("build.zig").install(b, exe, b.path(".")));
         } else {
             b.installArtifact(exe);
+            const demo = b.addRunArtifact(exe);
+            b.step("run-collection-picker", "Open the native collection picker").dependOn(&demo.step);
             const run = b.addRunArtifact(exe);
             run.addArg("--verify");
             verify.dependOn(&run.step);
