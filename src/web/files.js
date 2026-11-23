@@ -9,6 +9,8 @@ export function createFilePicker(document) {
       if (!Number.isSafeInteger(maxBytes) || maxBytes < 0)
         return Promise.reject(new RangeError("Invalid file size limit"));
       if (signal?.aborted) return Promise.reject(signal.reason);
+      if (document.defaultView?.navigator.userActivation?.isActive === false)
+        return Promise.reject(new DOMException("File picking needs a user gesture", "NotAllowedError"));
       return new Promise((resolve, reject) => {
         const input = document.createElement("input");
         input.type = "file";
@@ -40,7 +42,9 @@ export function createFilePicker(document) {
           }
         }, { once: true });
         document.body.append(input);
-        try { input.showPicker(); }
+        // Programmatic click forwards the current trusted gesture to the
+        // file input on engines where showPicker does not open it.
+        try { input.click(); }
         catch (error) { finish(null, error); }
       });
     },

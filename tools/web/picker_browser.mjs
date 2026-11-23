@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
-import { chromium, firefox, webkit } from "playwright";
+
 import { chromiumOptions } from "./browser_options.mjs";
 import { serve } from "./serve.mjs";
 
-const server = await serve();
+const { chromium, firefox, webkit } = await import(process.env.NANOUI_PLAYWRIGHT_MODULE ?? "playwright");
 const engine = process.env.NANOUI_PICKER_ENGINE ?? "chromium";
 const type = { chromium, firefox, webkit }[engine];
 if (!type) throw new Error(`Unknown browser engine: ${engine}`);
 const browser = await type.launch(engine === "chromium" ? chromiumOptions() : { headless: true });
+let server;
 try {
+  server = await serve();
   for (const cpu of engine === "chromium" ? [false, true] : [true]) {
     const page = await browser.newPage({ viewport: { width: 360, height: 440 } });
     if (cpu) await page.addInitScript(() => Object.defineProperty(navigator, "gpu", { value: undefined }));
@@ -112,6 +114,16 @@ try {
     });
     await large.setFiles({ name: "large.txt", mimeType: "text/plain", buffer: Buffer.alloc(33, 65) });
     assert.equal(await page.evaluate(() => window.fileRejected), true);
+    await Promise.all([
+      page.waitForEvent("filechooser"),
+      page.getByRole("button", { name: "Choose test file" }).click(),
+    ]);
+    assert.equal(await page.evaluate(() => {
+      document.querySelector('input[type="file"]').dispatchEvent(new Event("cancel"));
+      return window.fileResult;
+    }), null);
+    await page.locator('input[type="file"]').waitFor({ state: "detached" });
+
 
     console.log(`PASS collection picker, composition, semantics, focus, clipboard and file on ${cpu ? "Canvas 2D" : "WebGPU"}`);
     await page.evaluate(() => window.nanoui.destroy());
@@ -119,5 +131,5 @@ try {
   }
 } finally {
   await browser.close();
-  await server.close();
+  await server?.close();
 }

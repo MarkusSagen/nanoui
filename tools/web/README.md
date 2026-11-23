@@ -132,6 +132,11 @@ The native check uses the offscreen Tester. The browser check uses Chromium's
 composition protocol and checks the semantic results and keyboard focus on
 WebGPU and forced Canvas 2D. The Firefox check runs the same fixture with
 injected composition events on Canvas 2D. They use disposable clipboard events
-and file fixtures.
+and file fixtures. On macOS 26.0.1 the pinned Playwright WebKit process crashed
+at startup. WebKit revision 2287 passed with the matching Playwright 1.60.0
+and injected composition on Canvas 2D. To try that pairing without changing
+the repo lock, set `NANOUI_PICKER_ENGINE=webkit` and
+`NANOUI_PLAYWRIGHT_MODULE` to the absolute `playwright/index.mjs` path from
+a separate 1.60.0 installation.
 
 See [MEASUREMENTS.md](MEASUREMENTS.md) for verification scope.
