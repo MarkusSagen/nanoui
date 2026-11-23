@@ -103,12 +103,12 @@ export fn nanoui_web_file_begin(id: u64) u32 {
 
 export fn nanoui_web_file_reserve(token: u32, name_len: usize, data_len: usize) usize {
     const s = web.active orelse return 0;
-    const request = &(s.files.pending orelse return 0);
+    const request = if (s.files.pending) |*pending| pending else return 0;
     if (request.token != token or request.buffer != null or name_len == 0 or name_len > 4096 or
         data_len > request.max_bytes) return 0;
     const buffer = s.gpa.alloc(u8, name_len + data_len) catch return 0;
-    s.files.pending.?.buffer = buffer;
-    s.files.pending.?.name_len = name_len;
+    request.buffer = buffer;
+    request.name_len = name_len;
     return @intFromPtr(buffer.ptr);
 }
 
