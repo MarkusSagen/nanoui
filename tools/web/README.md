@@ -124,12 +124,26 @@ tries to recover WebGPU first. If recovery fails, an attached DOM canvas is
 replaced in place and the mounted Zig view and semantic controls keep their
 state. Use `runtime.canvas` to find the current element. Event listeners
 installed directly by an embedder need to be attached to the replacement.
-Workers and externally owned devices use their existing device recovery paths.
+Externally owned devices use the app's device recovery path.
 `cpu: true` forces Canvas 2D on startup.
 The Canvas 2D path caps the presentation buffer at 4096 × 4096 pixels by
 reducing backing scale. GPU textures, custom GPU encoding and GPU timing
 require WebGPU. Native dialogs, multi-window, a full App/Window platform,
 and comprehensive screen-reader acceptance remain separate work.
+
+In a Worker, pass `replaceOffscreenCanvas` to `start` alongside
+`cpuFallback: true`. It may return a fresh `OffscreenCanvas` or a promise
+for one. Return null to decline and let `onError` report the recovery failure.
+The Worker keeps the mounted view and applies the most recent requested
+size and scale to the new canvas.
+
+To opt in with the bundled `worker.js`, include `cpuFallback: true` in
+the initial message. On `{ replaceCanvas: true }`, the page creates a fresh
+canvas element, transfers it to OffscreenCanvas, replaces the visible
+element, and replies with `{ fallbackCanvas: offscreen }`, transferring
+`offscreen` in the message's transfer list. The page owns focus and the
+forwarded input listeners. Reply with `{ fallbackCanvas: null }` if the page
+cannot supply a replacement.
 
 ## Workspace collection picker
 

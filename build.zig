@@ -524,7 +524,5 @@ fn addWebDemo(b: *std.Build, native: *std.Build.Module) void {
     }
     if (b.option([]const u8, "workspace-search", "zig-workspace root for the shared picker fixture")) |workspace|
         @import("tools/web/picker_build.zig").add(b, workspace, native, core, step);
-    for ([_][]const u8{ "gpu.js", "gpu_timing.js", "external.js", "wasi.js", "nanoui.js", "host.js", "semantics.js", "files.js", "index.html", "worker.js" }) |file| {
-        step.dependOn(&b.addInstallFile(b.path(b.fmt("src/web/{s}", .{file})), b.fmt("web/{s}", .{file})).step);
-    }
+    step.dependOn(&b.addInstallFile(b.path("src/web/index.html"), "web/index.html").step);
 }

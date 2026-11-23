@@ -93,16 +93,53 @@ try {
   await page.waitForTimeout(300);
   {const result=await compare();assert.ok(result.mean<0.05);}
   await page.evaluate(()=>{const r=window.nanoui;r.destroy();r.device.destroy();});
+  await page.route('**/worker.js', async route => {
+    const response = await route.fetch();
+    await route.fulfill({ response, body: (await response.text()) + `
+self.addEventListener("message", ({ data }) => {
+  if (!data.loseDevice) return;
+  navigator.gpu.requestAdapter = async () => null;
+  runtime.host.debugLoseDevice();
+});
+` });
+  });
   await page.evaluate(async () => {
     const old=document.querySelector('canvas');old.remove();
     const canvas=document.createElement('canvas');canvas.style.width='420px';canvas.style.height='300px';document.body.append(canvas);
+    canvas.tabIndex = 0;
+    canvas.setAttribute('aria-label', 'Worker counter');
     const worker=new Worker('./worker.js',{type:'module'});
     let seq=0; const pending=new Map();
-    worker.onmessage=({data})=>{ if(data.error)throw Error(data.error); const f=pending.get(data.id??'ready');if(f){pending.delete(data.id??'ready');f(data);} };
+    const probe = { worker, canvas, info: () => new Promise(resolve => {
+      const id = ++seq;
+      pending.set(id, resolve);
+      worker.postMessage({ info: id });
+    }) };
+    worker.onmessage = ({ data }) => {
+      if (data.error) throw Error(data.error);
+      if (data.replaceCanvas) {
+        probe.replaceCanvas = () => {
+          const replacement = canvas.cloneNode(false);
+          const focused = document.activeElement === canvas;
+          const offscreen = replacement.transferControlToOffscreen();
+          canvas.replaceWith(replacement);
+          if (focused) replacement.focus();
+          worker.postMessage({ fallbackCanvas: offscreen }, [offscreen]);
+        };
+        return;
+      }
+      const key = data.id ?? 'ready';
+      const resolve = pending.get(key);
+      if (resolve) {
+        pending.delete(key);
+        resolve(data);
+      }
+    };
     const ready=new Promise(resolve=>pending.set('ready',resolve));
     const offscreen=canvas.transferControlToOffscreen();
-    worker.postMessage({canvas:offscreen,width:840,height:600,scale:2},[offscreen]);await ready;
-    window.workerProbe={worker,info:()=>new Promise(resolve=>{const id=++seq;pending.set(id,resolve);worker.postMessage({info:id});})};
+    worker.postMessage({ canvas: offscreen, width: 840, height: 600, scale: 2, cpuFallback: true }, [offscreen]);
+    await ready;
+    window.workerProbe = probe;
   });
   await page.waitForTimeout(400);
   const workerBefore=await page.evaluate(()=>window.workerProbe.info());
@@ -120,6 +157,51 @@ try {
     const after = await window.workerProbe.info();
     return after.value === 1 && after.callbacks === before.callbacks;
   }, undefined, { timeout: 8000 });
+  const workerGpu = await page.evaluate(() => {
+    const probe = window.workerProbe;
+    probe.canvas.focus();
+    probe.worker.postMessage({ loseDevice: true });
+    return probe.info();
+  });
+  assert.equal(workerGpu.generation, 1);
+  await page.waitForFunction(() => !!window.workerProbe.replaceCanvas);
+  await page.evaluate(() => {
+    const probe = window.workerProbe;
+    // Resize while recovery is waiting for the page to transfer a canvas.
+    probe.canvas.style.width = '400px';
+    probe.worker.postMessage({ resize: [800, 600, 2] });
+    probe.replaceCanvas();
+  });
+  await page.waitForFunction(async before => {
+    const info = await window.workerProbe.info();
+    return info.generation === 0 && info.value === 1 && info.frames > before.frames;
+  }, workerGpu);
+  await page.waitForFunction(() => {
+    const canvas = document.querySelector('canvas');
+    return document.activeElement === canvas && !window.workerProbe.canvas.isConnected &&
+      canvas.width === 800 && canvas.height === 600;
+  });
+  const png = await page.getByLabel('Worker counter').screenshot({ scale: 'device' });
+  assert.equal(await page.evaluate(async data => {
+    const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
+    const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+    const scratch = new OffscreenCanvas(bitmap.width, bitmap.height).getContext('2d');
+    scratch.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    const pixels = scratch.getImageData(25, 25, 750, 550).data;
+    return pixels.some((value, index) => index % 4 === 0 && value !== pixels[0]);
+  }, png.toString('base64')), true, 'Worker Canvas 2D presents visible content');
+  await page.evaluate(() => {
+    const { worker } = window.workerProbe;
+    worker.postMessage({ pointer: [1, 197, 185] });
+    worker.postMessage({ pointer: [2, 197, 185] });
+  });
+  await page.waitForFunction(async () => {
+    const before = await window.workerProbe.info();
+    if (before.value !== 2) return false;
+    await new Promise(resolve => setTimeout(resolve, 300));
+    return (await window.workerProbe.info()).callbacks === before.callbacks;
+  });
   await page.evaluate(()=>window.workerProbe.worker.postMessage({destroy:true}));
   const scaleOne=await browser.newContext({viewport:{width:420,height:300},deviceScaleFactor:1});
   const low=await scaleOne.newPage();low.on('pageerror',e=>errors.push(e.message));
@@ -240,5 +322,5 @@ try {
     window.nanoui.exports.nanoui_web_frames() === 0), true);
   await closing.close();
   assert.deepEqual(errors,[]);
-  console.log('PASS canvas, click, idle, resize/DPR, device recovery, live Canvas 2D failover, disposal, Worker input and idle, Gallery keyboard and IME');
+  console.log('PASS canvas, click, idle, resize/DPR, device recovery, live DOM and Worker Canvas 2D failover, disposal, Gallery keyboard and IME');
 } finally { await browser.close(); await host.close(); }

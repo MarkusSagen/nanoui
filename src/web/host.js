@@ -19,6 +19,7 @@ export function createHost(canvas, options = {}) {
   const files = canvas.ownerDocument ? createFilePicker(canvas.ownerDocument) : null;
   let cpuImage, semantics, zigFile;
   let cpu = options.cpu;
+  let lastResize;
   let runtime, context, frame = null, timer = null, observer, media;
   let stopped = false, lost = false, paused = true, generation = 0, forceRecovery = false;
   const listeners = [];
@@ -74,6 +75,7 @@ export function createHost(canvas, options = {}) {
       height = Math.round((rect?.height ?? canvas.height / scale) * scale);
     }
     if (![width, height, scale].every(Number.isFinite) || width < 1 || height < 1 || scale <= 0) return;
+    lastResize = [width, height, scale];
     if (cpu && width * height > 4096 * 4096) {
       const ratio = Math.sqrt((4096 * 4096) / (width * height));
       width = Math.max(1, Math.floor(width * ratio));
@@ -171,15 +173,11 @@ export function createHost(canvas, options = {}) {
     observer?.disconnect();
     for (const off of listeners.splice(0)) off();
   }
-  function fallback() {
-    // Browsers lock each canvas to its first context type. Keep the WASM
-    // surface and its semantic nodes, and swap only the drawing element.
-    if (!options.cpuFallback || !canvas.parentNode || !canvas.ownerDocument) return false;
-    const replacement = canvas.cloneNode(false);
+  function useCpu(replacement) {
     const nextContext = replacement.getContext("2d", { alpha: false });
     if (!nextContext) return false;
     const previous = canvas;
-    const restoreFocus = previous.ownerDocument.activeElement === previous;
+    const restoreFocus = previous.ownerDocument?.activeElement === previous;
     runtime.exports.nanoui_web_use_cpu();
     const gpu = runtime.gpu;
     const device = gpu.device;
@@ -190,8 +188,10 @@ export function createHost(canvas, options = {}) {
     cpu = true;
     lost = false;
     detachListeners();
-    replacement.style.touchAction = previous.style.touchAction;
-    previous.replaceWith(replacement);
+    if (previous.ownerDocument) {
+      replacement.style.touchAction = previous.style.touchAction;
+      previous.replaceWith(replacement);
+    }
     canvas = replacement;
     context = nextContext;
     semantics?.setCanvas(replacement);
@@ -199,6 +199,23 @@ export function createHost(canvas, options = {}) {
     if (restoreFocus) replacement.focus({ preventScroll: true });
     request();
     return true;
+  }
+  async function recoverOnCpu(operation, error) {
+    if (stopped || operation !== generation) return;
+    if (options.cpuFallback) {
+      // A canvas keeps its context type. In a Worker, the embedder must
+      // transfer a fresh canvas from the page that owns the visible element.
+      try {
+        const replacement = canvas.ownerDocument
+          ? canvas.parentNode && canvas.cloneNode(false)
+          : await options.replaceOffscreenCanvas?.();
+        if (stopped || operation !== generation) return;
+        if (replacement && replacement !== canvas && useCpu(replacement)) return;
+      } catch (fallbackError) {
+        error = fallbackError;
+      }
+    }
+    options.onError?.(error);
   }
   function watchDevice() {
     const device = runtime.gpu.device;
@@ -226,7 +243,7 @@ export function createHost(canvas, options = {}) {
           operation = ++generation;
           await replaceDevice(next, operation);
         } catch (error) {
-          if (!stopped && operation === generation && !fallback()) options.onError?.(error);
+          await recoverOnCpu(operation, error);
         }
       }
     });
@@ -310,7 +327,7 @@ export function createHost(canvas, options = {}) {
     },
     listen() {
       paused = false;
-      resize(options.width, options.height, options.scale);
+      resize(...(lastResize ?? [options.width, options.height, options.scale]));
       if (canvas.getBoundingClientRect) {
         if (options.keyboard) {
           const forwarded = new Map();
