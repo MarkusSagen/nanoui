@@ -18,10 +18,11 @@ export function createHost(canvas, options = {}) {
   const decoder = new TextDecoder();
   const files = canvas.ownerDocument ? createFilePicker(canvas.ownerDocument) : null;
   let cpuImage, semantics, zigFile;
+  let cpu = options.cpu;
   let runtime, context, frame = null, timer = null, observer, media;
   let stopped = false, lost = false, paused = true, generation = 0, forceRecovery = false;
   const listeners = [];
-  const inputEvents = [];
+  let inputEvents = [];
   const unwind = Symbol("nanoui.run");
   const stats = { callbacks: 0 };
   const raf = options.requestAnimationFrame ?? globalThis.requestAnimationFrame.bind(globalThis);
@@ -73,7 +74,7 @@ export function createHost(canvas, options = {}) {
       height = Math.round((rect?.height ?? canvas.height / scale) * scale);
     }
     if (![width, height, scale].every(Number.isFinite) || width < 1 || height < 1 || scale <= 0) return;
-    if (options.cpu && width * height > 4096 * 4096) {
+    if (cpu && width * height > 4096 * 4096) {
       const ratio = Math.sqrt((4096 * 4096) / (width * height));
       width = Math.max(1, Math.floor(width * ratio));
       height = Math.max(1, Math.floor(height * ratio));
@@ -162,6 +163,43 @@ export function createHost(canvas, options = {}) {
       alphaMode: "opaque", usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST });
     runtime.gpu.setCanvas(context);
   }
+  function cancelFrame() {
+    if (frame !== null) { caf(frame); frame = null; }
+    if (timer !== null) { clearTimeout(timer); timer = null; }
+  }
+  function detachListeners() {
+    observer?.disconnect();
+    for (const off of listeners.splice(0)) off();
+  }
+  function fallback() {
+    // Browsers lock each canvas to its first context type. Keep the WASM
+    // surface and its semantic nodes, and swap only the drawing element.
+    if (!options.cpuFallback || !canvas.parentNode || !canvas.ownerDocument) return false;
+    const replacement = canvas.cloneNode(false);
+    const nextContext = replacement.getContext("2d", { alpha: false });
+    if (!nextContext) return false;
+    const previous = canvas;
+    const restoreFocus = previous.ownerDocument.activeElement === previous;
+    runtime.exports.nanoui_web_use_cpu();
+    const gpu = runtime.gpu;
+    const device = gpu.device;
+    context.unconfigure();
+    gpu.retire();
+    device.destroy();
+    runtime.gpu = null;
+    cpu = true;
+    lost = false;
+    detachListeners();
+    replacement.style.touchAction = previous.style.touchAction;
+    previous.replaceWith(replacement);
+    canvas = replacement;
+    context = nextContext;
+    semantics?.setCanvas(replacement);
+    host.listen();
+    if (restoreFocus) replacement.focus({ preventScroll: true });
+    request();
+    return true;
+  }
   function watchDevice() {
     const device = runtime.gpu.device;
     const current = ++generation;
@@ -169,32 +207,54 @@ export function createHost(canvas, options = {}) {
       if (stopped || current !== generation) return;
       lost = true;
       runtime.exports.nanoui_web_device_lost();
-      if (frame !== null) { caf(frame); frame = null; }
-      if (timer !== null) { clearTimeout(timer); timer = null; }
+      cancelFrame();
+      // A release can arrive while rendering is suspended. Preserve input
+      // already committed by the browser's semantic editor.
+      runtime.exports.nanoui_web_cancel_input();
+      inputEvents = inputEvents.filter(([kind]) => kind === "text" || kind === "access");
       const recover = info.reason !== "destroyed" || forceRecovery;
       forceRecovery = false;
       options.onDeviceLost?.(info);
-      if (options.ownsDevice && recover) {
-        try { await setDevice(await options.acquireDevice()); }
-        catch (error) { options.onError?.(error); }
+      if (options.ownsDevice && recover && !stopped && current === generation) {
+        let operation = current;
+        try {
+          const next = await options.acquireDevice();
+          if (stopped || current !== generation) {
+            next.destroy();
+            return;
+          }
+          operation = ++generation;
+          await replaceDevice(next, operation);
+        } catch (error) {
+          if (!stopped && operation === generation && !fallback()) options.onError?.(error);
+        }
       }
     });
   }
-  async function setDevice(device) {
-    if (stopped) return;
-    if (options.cpu) throw new Error("The canvas is using its CPU renderer");
+  async function replaceDevice(device, operation) {
     paused = true;
-    if (frame !== null) { caf(frame); frame = null; }
-    if (timer !== null) { clearTimeout(timer); timer = null; }
+    cancelFrame();
+    const previous = runtime.device;
     runtime.gpu.setDevice(device);
+    if (options.ownsDevice && previous !== device) previous.destroy();
     configure();
     if (runtime.exports.nanoui_web_device()) throw new Error("Could not recreate WebGPU renderer");
-    await runtime.gpu.ready();
+    await Promise.race([
+      runtime.gpu.ready(),
+      device.lost.then(info => { throw new Error(info.message || "Replacement WebGPU device was lost"); }),
+    ]);
+    if (stopped || operation !== generation) return;
     lost = false; paused = false;
     watchDevice();
     request();
   }
-  return {
+  async function setDevice(device) {
+    if (stopped) return;
+    if (cpu) throw new Error("The canvas is using its CPU renderer");
+    await replaceDevice(device, ++generation);
+  }
+  const host = {
+    get canvas() { return canvas; },
     pickFile: options => files?.pickFile(options) ?? Promise.reject(new Error("File picking requires a document")),
     stats, unwind, requestFrame: request, resize, pointer, wheel, pinch, key, setDevice,
     imports: {
@@ -204,7 +264,7 @@ export function createHost(canvas, options = {}) {
         zigFile = null;
         request.abort.abort();
       },
-      cpu_backend: () => Number(options.cpu),
+      cpu_backend: () => Number(cpu),
       semantics_enabled: () => Number(!!semantics),
       publish_semantics(ptr, len) {
         const bytes = new Uint8Array(runtime.exports.memory.buffer, ptr, len);
@@ -230,12 +290,12 @@ export function createHost(canvas, options = {}) {
       runtime = value;
       if (options.semantics && canvas.ownerDocument) {
         semantics = createSemantics(canvas, event => {
-          if (stopped || lost) return;
+          if (stopped) return;
           inputEvents.push(event);
           request();
         }, pickFromZig);
       }
-      if (options.cpu) {
+      if (cpu) {
         context = canvas.getContext("2d", { alpha: false });
         if (!context) throw new Error("Canvas 2D context is unavailable");
         return;
@@ -374,19 +434,18 @@ export function createHost(canvas, options = {}) {
       if (stopped) return;
       stopped = true; generation++;
       inputEvents.length=0;
-      if (frame !== null) caf(frame);
-      if (timer !== null) clearTimeout(timer);
-      observer?.disconnect();
-      for (const off of listeners) off();
+      cancelFrame();
+      detachListeners();
       files?.destroy();
       zigFile = null;
       semantics?.destroy();
       runtime?.exports.nanoui_web_destroy();
       context?.unconfigure?.();
       runtime?.gpu?.dispose();
-      if(options.ownsDevice)runtime?.device.destroy();
+      if (options.ownsDevice) runtime?.device?.destroy();
     },
   };
+  return host;
 }
 
 

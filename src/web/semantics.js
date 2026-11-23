@@ -158,7 +158,10 @@ export function createSemantics(canvas, send, pickFile) {
     }
   }
 
-  return { root, publish, destroy() {
+  return { root, publish, setCanvas(next) {
+    canvas = next;
+    lastJson = undefined;
+  }, destroy() {
     root.remove();
     nodes.clear();
     fileButtons.clear();

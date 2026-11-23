@@ -118,12 +118,17 @@ JavaScript integrations can also use
 `runtime.host.pickFile({ accept, maxBytes, signal })` in a browser user gesture.
 It returns `{ name, type, bytes }` or null on cancellation.
 
-`start({ ..., cpuFallback: true })` uses the existing Zig CPU rasterizer if
-adapter or device acquisition fails. `cpu: true` forces it on startup.
+`start({ ..., cpuFallback: true })` uses the Zig CPU rasterizer if adapter or
+device acquisition fails. If a host-owned WebGPU device is lost, the host
+tries to recover WebGPU first. If recovery fails, an attached DOM canvas is
+replaced in place and the mounted Zig view and semantic controls keep their
+state. Use `runtime.canvas` to find the current element. Event listeners
+installed directly by an embedder need to be attached to the replacement.
+Workers and externally owned devices use their existing device recovery paths.
+`cpu: true` forces Canvas 2D on startup.
 The Canvas 2D path caps the presentation buffer at 4096 × 4096 pixels by
 reducing backing scale. GPU textures, custom GPU encoding and GPU timing
-require WebGPU. The fallback does not replace a mounted WebGPU context if it
-loses its device. Native dialogs, multi-window, a full App/Window platform,
+require WebGPU. Native dialogs, multi-window, a full App/Window platform,
 and comprehensive screen-reader acceptance remain separate work.
 
 ## Workspace collection picker

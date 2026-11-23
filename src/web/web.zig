@@ -166,6 +166,17 @@ pub const Surface = struct {
         s.requestFrame();
     }
 
+    pub fn useCpu(s: *Surface) void {
+        s.text.images.sink = null;
+        if (s.renderer) |*renderer| renderer.deinit();
+        s.renderer = null;
+        s.text.images.invalidateAtlas();
+        s.ctx.retain.scroll_scene_ok = false;
+        s.last_time = 0;
+        s.lost = false;
+        s.requestFrame();
+    }
+
     pub fn deinit(s: *Surface) void {
         if (active == s) active = null;
         if (s.frame_log) |*log| log.deinit();

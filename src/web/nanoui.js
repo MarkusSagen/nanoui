@@ -22,7 +22,10 @@ export async function load({ url, device, format = "bgra8unorm", imports = {}, a
     if (!response.ok) throw new Error(`Loading wasm: HTTP ${response.status}`);
     ({ instance } = await WebAssembly.instantiate(await response.arrayBuffer(), {
       wasi_snapshot_preview1: createWASI(() => instance.exports.memory),
-      nanoui_gpu: gpu?.imports ?? new Proxy({}, { get: () => () => { throw new Error("WebGPU resources are unavailable on the CPU renderer"); } }), ...imports,
+      nanoui_gpu: gpu?.imports ?? new Proxy({
+        device: () => 0,
+        device_generation: () => 0,
+      }, { get: (target, key) => target[key] ?? (() => { throw new Error("WebGPU resources are unavailable on the CPU renderer"); }) }), ...imports,
     }));
     instance.exports._initialize?.();
   } catch (error) {
@@ -31,7 +34,7 @@ export async function load({ url, device, format = "bgra8unorm", imports = {}, a
     throw error;
   }
   Object.assign(runtime, { exports: instance.exports, gpu });
-  Object.defineProperty(runtime, "device", { get: () => gpu?.device });
+  Object.defineProperty(runtime, "device", { get: () => runtime.gpu?.device });
   return runtime;
 }
 
@@ -58,6 +61,7 @@ export async function start(options) {
     catch (error) { if (error !== host.unwind) throw error; }
     await runtime.gpu?.ready();
     host.listen();
+    Object.defineProperty(runtime, "canvas", { get: () => host.canvas });
     return Object.assign(runtime, { host, setDevice: host.setDevice, destroy: host.destroy, requestFrame: host.requestFrame });
   } catch (error) {
     host.destroy();
