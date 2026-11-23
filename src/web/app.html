@@ -20,10 +20,13 @@ canvas.setAttribute('aria-label', name);
 
 try {
   window.nanoui = await start({
-    canvas, url: wasm,
+    canvas, url: wasm, cpuFallback: true, semantics: true,
     keyboard(e) {
       if (e.key === 'Tab' || e.altKey || /^F\d+$/.test(e.key)) return false;
-      if (e.ctrlKey || e.metaKey) return e.key.toLowerCase() === 'k';
+      if (e.ctrlKey || e.metaKey) {
+        const key = e.key.toLowerCase();
+        return key === 'k' || (key === 'a' && e.target.tagName === 'TEXTAREA');
+      }
       return true;
     },
     onError: console.error,

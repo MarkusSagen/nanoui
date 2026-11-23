@@ -14,6 +14,7 @@
     },
     .paths = .{
         "tools/web/build.zig",
+        "tools/web/picker_build.zig",
         "build.zig",
         "build.zig.zon",
         "src",

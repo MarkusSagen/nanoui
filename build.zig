@@ -35,7 +35,7 @@ pub fn build(b: *std.Build) void {
     nanoui.addOptions("build_options", options);
     addWebCheck(b);
     addWebParity(b);
-    addWebDemo(b);
+    addWebDemo(b, nanoui);
     const os = target.result.os.tag;
     if (os == .macos) {
         const rt_options = b.addOptions();
@@ -503,12 +503,12 @@ fn addWebParity(b: *std.Build) void {
     exe.rdynamic = true;
     exe.wasi_exec_model = .reactor;
     step.dependOn(&b.addInstallArtifact(exe, .{ .dest_dir = .{ .override = .{ .custom = "web" } } }).step);
-    for ([_][]const u8{ "gpu.js", "gpu_timing.js", "external.js", "wasi.js", "nanoui.js", "host.js" }) |file| {
+    for ([_][]const u8{ "gpu.js", "gpu_timing.js", "external.js", "wasi.js", "nanoui.js", "host.js", "semantics.js", "files.js" }) |file| {
         step.dependOn(&b.addInstallFile(b.path(b.fmt("src/web/{s}", .{file})), b.fmt("web/{s}", .{file})).step);
     }
 }
 
-fn addWebDemo(b: *std.Build) void {
+fn addWebDemo(b: *std.Build, native: *std.Build.Module) void {
     const step = b.step("web-demo", "Build the counter canvas demo");
     const target = b.resolveTargetQuery(.{ .cpu_arch = .wasm32, .os_tag = .wasi });
     const core = b.createModule(.{ .root_source_file = b.path("src/nanoui.zig"), .target = target, .optimize = .ReleaseSmall, .single_threaded = true, .link_libc = true });
@@ -522,7 +522,9 @@ fn addWebDemo(b: *std.Build) void {
         const exe = b.addExecutable(.{ .name = name, .root_module = root });
         step.dependOn(web.install(b, exe, b.path(".")));
     }
-    for ([_][]const u8{ "gpu.js", "gpu_timing.js", "external.js", "wasi.js", "nanoui.js", "host.js", "index.html", "worker.js" }) |file| {
+    if (b.option([]const u8, "workspace-search", "zig-workspace root for the shared picker fixture")) |workspace|
+        @import("tools/web/picker_build.zig").add(b, workspace, native, core, step);
+    for ([_][]const u8{ "gpu.js", "gpu_timing.js", "external.js", "wasi.js", "nanoui.js", "host.js", "semantics.js", "files.js", "index.html", "worker.js" }) |file| {
         step.dependOn(&b.addInstallFile(b.path(b.fmt("src/web/{s}", .{file})), b.fmt("web/{s}", .{file})).step);
     }
 }

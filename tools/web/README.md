@@ -24,10 +24,10 @@ node tools/web/browser.mjs
 node tools/web/serve.mjs
 ```
 
-Open the printed loopback URL with `/index.html` (counter) or
-`/index.html?app=gallery`. There is no CPU presentation fallback. The tests
-fail on missing WebGPU, any shader diagnostic or validation error. Linux CI
-uses pinned Playwright 1.63.0 with SwiftShader and the same checks.
+Open the printed loopback URL with `/counter.html` or `/gallery.html`.
+The default shell uses Canvas 2D when it cannot acquire a WebGPU device.
+The GPU parity checks still require WebGPU and fail on shader diagnostics or
+validation errors. Linux CI uses pinned Playwright with SwiftShader.
 
 `NANOUI_GPU=hardware node tools/web/parity.mjs` selects ANGLE Metal on this
 Mac and adds H.264/HEVC decode tests. `NANOUI_ENGINE=webkit` selects WebKit.
@@ -89,9 +89,44 @@ Workers can forward a pinch through `runtime.host.pinch(x, y, scale, dx, dy)`.
 On a focusable DOM canvas, pass a `keyboard(event)` predicate to `start` to
 forward selected key events. The Gallery demo uses this for its Zig command
 palette. The predicate leaves browser-owned shortcuts and Tab available.
-Apps still need IME, clipboard, dialogs, filesystem, semantic accessibility,
-multi-window and a complete
-App/Window platform remain separate work. Opaque desktop handle types let
-shared app state compile without creating desktop windows in the browser.
+The default shell also enables `semantics: true`. That option projects labels,
+headings, text fields, buttons and choices from Zig's accessibility tree into
+the DOM. A browser text field hosts IME composition at the Zig caret; commit
+inserts one UTF-8 operation into the focused Zig field. Copy, cut and paste
+use browser clipboard events in that field, with password selections omitted.
+A commit or paste is limited to 64 KiB. Browser preedit is displayed by the DOM
+field and is not sent to Zig until commit.
+
+`runtime.host.pickFile({ accept, maxBytes, signal })` must be invoked in a
+browser user gesture. It reads one selected file as `{ name, type, bytes }`,
+resolves to null on picker cancellation, and defaults to a 16 MiB limit.
+`accept` is a picker hint. Validate content in the caller. The host does not
+expose unrestricted paths or request filesystem permission at startup.
+
+`start({ ..., cpuFallback: true })` uses the existing Zig CPU rasterizer if
+adapter or device acquisition fails. `cpu: true` forces it on startup.
+The Canvas 2D path caps the presentation buffer at 4096 × 4096 pixels by
+reducing backing scale. GPU textures, custom GPU encoding and GPU timing
+require WebGPU. The fallback does not replace a mounted WebGPU context if it
+loses its device. Native dialogs, multi-window, a full App/Window platform,
+and comprehensive screen-reader acceptance remain separate work.
+
+## Workspace collection picker
+
+Build the same fixture for native and WASI against the sibling workspace's
+actual Zig search library:
+
+```sh
+zig build picker-check web-demo -Dworkspace-search=../zig-workspace -j1
+node tools/web/picker_browser.mjs
+NANOUI_PICKER_ENGINE=firefox node tools/web/picker_browser.mjs
+node tools/web/compat.mjs
+```
+
+The native check uses the offscreen Tester. The browser check uses Chromium's
+composition protocol and checks the semantic results and keyboard focus on
+WebGPU and forced Canvas 2D. The Firefox check runs the same fixture with
+injected composition events on Canvas 2D. They use disposable clipboard events
+and file fixtures.
 
 See [MEASUREMENTS.md](MEASUREMENTS.md) for verification scope.

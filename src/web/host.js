@@ -1,3 +1,6 @@
+import { createFilePicker } from "./files.js";
+import { createSemantics } from "./semantics.js";
+
 // Canvas lifecycle and event delivery. Applications opt in to keyboard
 // events so they can keep the browser's own shortcuts where appropriate.
 const namedKeys = {
@@ -12,6 +15,9 @@ function keyCode(name) {
   return Array.from(name).length === 1 ? name.codePointAt(0) : 0;
 }
 export function createHost(canvas, options = {}) {
+  const decoder = new TextDecoder();
+  const files = canvas.ownerDocument ? createFilePicker(canvas.ownerDocument) : null;
+  let cpuImage, semantics;
   let runtime, context, frame = null, timer = null, observer, media;
   let stopped = false, lost = false, paused = true, generation = 0, forceRecovery = false;
   const listeners = [];
@@ -36,13 +42,21 @@ export function createHost(canvas, options = {}) {
           const event = inputEvents.shift();
           if (event[0] === "pinch") runtime.exports.nanoui_web_pinch(...event.slice(1));
           else if (event[0] === "key") runtime.exports.nanoui_web_key(...event.slice(1));
-          else runtime.exports.nanoui_web_pointer(...event);
+          else if (event[0] === "access") runtime.exports.nanoui_web_access(...event.slice(1));
+          else if (event[0] === "text") {
+            const [, id, bytes, cut] = event;
+            if (bytes.length <= 65536) {
+              const e = runtime.exports;
+              new Uint8Array(e.memory.buffer, e.nanoui_web_text_buffer(), bytes.length).set(bytes);
+              e.nanoui_web_text(id, bytes.length, cut);
+            }
+          } else runtime.exports.nanoui_web_pointer(...event);
           if (event[0] !== 0 && !(event[0] === "key" && event[1] === 3)) break;
         }
-        const submitted = runtime.gpu.stats.frames;
+        const submitted = runtime.gpu?.stats.frames;
         const more=runtime.exports.nanoui_web_frame(time);
-        const sample=runtime.gpu.stats.samples.at(-1);
-        if(sample && runtime.gpu.stats.frames !== submitted)sample.log_index=runtime.exports.nanoui_web_last_record();
+        const sample=runtime.gpu?.stats.samples.at(-1);
+        if(sample && runtime.gpu?.stats.frames !== submitted)sample.log_index=runtime.exports.nanoui_web_last_record();
         if(more || inputEvents.length)request();
       }
     });
@@ -58,7 +72,13 @@ export function createHost(canvas, options = {}) {
       width = Math.round((rect?.width ?? canvas.width / scale) * scale);
       height = Math.round((rect?.height ?? canvas.height / scale) * scale);
     }
-    if (width < 1 || height < 1) return;
+    if (![width, height, scale].every(Number.isFinite) || width < 1 || height < 1 || scale <= 0) return;
+    if (options.cpu && width * height > 4096 * 4096) {
+      const ratio = Math.sqrt((4096 * 4096) / (width * height));
+      width = Math.max(1, Math.floor(width * ratio));
+      height = Math.max(1, Math.floor(height * ratio));
+      scale *= ratio;
+    }
     if (canvas.width !== width) canvas.width = width;
     if (canvas.height !== height) canvas.height = height;
     runtime.exports.nanoui_web_resize(width, height, scale);
@@ -119,6 +139,7 @@ export function createHost(canvas, options = {}) {
   }
   async function setDevice(device) {
     if (stopped) return;
+    if (options.cpu) throw new Error("The canvas is using its CPU renderer");
     paused = true;
     if (frame !== null) { caf(frame); frame = null; }
     if (timer !== null) { clearTimeout(timer); timer = null; }
@@ -131,10 +152,45 @@ export function createHost(canvas, options = {}) {
     request();
   }
   return {
+    pickFile: options => files?.pickFile(options) ?? Promise.reject(new Error("File picking requires a document")),
     stats, unwind, requestFrame: request, resize, pointer, wheel, pinch, key, setDevice,
-    imports: { request_frame: request, request_after: after, now_ms: () => performance.now(), run_forever() { throw unwind; } },
+    imports: {
+      cpu_backend: () => Number(options.cpu),
+      semantics_enabled: () => Number(!!semantics),
+      publish_semantics(ptr, len) {
+        const bytes = new Uint8Array(runtime.exports.memory.buffer, ptr, len);
+        semantics?.publish(decoder.decode(bytes));
+      },
+      present_cpu(ptr, width, height) {
+        if (!context || stopped) return;
+        if (cpuImage?.width !== width || cpuImage?.height !== height)
+          cpuImage = context.createImageData(width, height);
+        const src = new Uint8Array(runtime.exports.memory.buffer, ptr, width * height * 4);
+        const dst = cpuImage.data;
+        for (let i = 0; i < src.length; i += 4) {
+          dst[i] = src[i + 2];
+          dst[i + 1] = src[i + 1];
+          dst[i + 2] = src[i];
+          dst[i + 3] = 255;
+        }
+        context.putImageData(cpuImage, 0, 0);
+      },
+      request_frame: request, request_after: after, now_ms: () => performance.now(), run_forever() { throw unwind; },
+    },
     attach(value) {
       runtime = value;
+      if (options.semantics && canvas.ownerDocument) {
+        semantics = createSemantics(canvas, event => {
+          if (stopped || lost) return;
+          inputEvents.push(event);
+          request();
+        });
+      }
+      if (options.cpu) {
+        context = canvas.getContext("2d", { alpha: false });
+        if (!context) throw new Error("Canvas 2D context is unavailable");
+        return;
+      }
       context = canvas.getContext("webgpu");
       if (!context) throw new Error("Canvas WebGPU context is unavailable");
       configure();
@@ -151,22 +207,29 @@ export function createHost(canvas, options = {}) {
           const forwarded = new Map();
           const mods = e => Number(e.shiftKey) | (Number(e.ctrlKey) << 1) |
             (Number(e.altKey) << 2) | (Number(e.metaKey) << 3) | (Number(e.repeat) << 4);
-          on(canvas, "keydown", e => {
+          const down = e => {
             if (e.defaultPrevented || e.isComposing || !options.keyboard(e)) return;
+            if (e.target.tagName === "BUTTON" && (e.key === "Enter" || e.key === " ")) return;
             const code = keyCode(e.key);
             if (!code) return;
-            const typed = Array.from(e.key).length === 1 && !e.ctrlKey && !e.metaKey ? code : 0;
+            const printable = Array.from(e.key).length === 1 && !e.ctrlKey && !e.metaKey;
+            if (printable && e.target.tagName === "TEXTAREA") return;
+            const typed = printable ? code : 0;
             forwarded.set(e.code, code);
             key(0, code, mods(e), typed);
             e.preventDefault();
-          });
-          on(canvas, "keyup", e => {
+          };
+          const up = e => {
             const code = forwarded.get(e.code);
             if (code === undefined) return;
             forwarded.delete(e.code);
             key(1, code, mods(e));
             e.preventDefault();
-          });
+          };
+          for (const target of [canvas, semantics?.root]) if (target) {
+            on(target, "keydown", down);
+            on(target, "keyup", up);
+          }
           on(canvas, "blur", () => {
             forwarded.clear();
             key(2, 0, 0);
@@ -266,9 +329,11 @@ export function createHost(canvas, options = {}) {
       if (timer !== null) clearTimeout(timer);
       observer?.disconnect();
       for (const off of listeners) off();
+      files?.destroy();
+      semantics?.destroy();
       runtime?.exports.nanoui_web_destroy();
-      context?.unconfigure();
-      runtime?.gpu.dispose();
+      context?.unconfigure?.();
+      runtime?.gpu?.dispose();
       if(options.ownsDevice)runtime?.device.destroy();
     },
   };

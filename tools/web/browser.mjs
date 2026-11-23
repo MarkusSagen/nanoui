@@ -133,8 +133,9 @@ try {
   await gallery.close();
   const unavailable = await context.newPage();
   await unavailable.addInitScript(() => Object.defineProperty(navigator, 'gpu', { value: undefined }));
-  await unavailable.goto(host.url + '/gallery.html');
-  assert.equal(await unavailable.getByRole('alert').textContent(), 'WebGPU is unavailable');
+  await unavailable.goto(host.url + '/counter.html');
+  await unavailable.waitForFunction(() => window.nanoui?.exports.nanoui_web_frames() > 0);
+  assert.equal(await unavailable.evaluate(() => window.nanoui.gpu === null), true);
   await unavailable.close();
   assert.deepEqual(errors,[]);
   console.log('PASS canvas, click, idle, resize/DPR, device loss, disposal, Worker input and idle, Gallery keyboard');
